@@ -1,0 +1,44 @@
+language: generic
+sudo: required
+services: docker
+addons:
+  apt:
+    update: true
+    packages:
+    - qemu-user-static
+    - binfmt-support
+
+env:
+  matrix:
+  - TARGET=ux64 CHROOT=xenial-amd64 HOST=amd64
+  - TARGET=u710cross CHROOT=xenial-amd64-arm64 HOST=arm64
+  - TARGET=u530cross CHROOT=xenial-amd64-armhf HOST=armhf
+
+install:
+- update-binfmts --display
+- docker system info
+- sudo rm /dev/shm
+- sudo mkdir /dev/shm
+- sudo mount --bind /run/shm /dev/shm
+- docker pull webispy/artik_devenv_$TARGET
+
+script:
+- docker run -it --name builder --privileged -v /var/lib/schroot -v $PWD:/home/work/src
+  -w /home/work/src webispy/artik_devenv_$TARGET bash -c "mkdir /home/work/result
+  && sbuild --chroot $CHROOT --host $HOST --dpkg-source-opts=\"-I.git*\" && cp /home/work/*.deb
+  /home/work/result/"
+
+before_deploy:
+- docker cp builder:/home/work/result /tmp/
+- ls -l /tmp/result
+
+deploy:
+  provider: releases
+  api_key:
+    secure: B+Yt1LdjN0U25hpM1pNi4zzrOU9BrXfAOq2KespZ6PlvtXxEG/p/+qRy7Z+9tvOnJ1IIclyIR4kGJDfQ+nMMEGhfrn+UrwF7WNECHvhTr385rHmCB0AHdXhI6pFfDOxODAo8confWu9VWD3tBgaw4V6h/0JomaYmkc3RKHcBhHC4rMyzuLohIn4EtJV8iOlpzMjyvenTFt1x9CirwCiqs3RCjRKiHNHn6FtRxZz3k6++PPEIQfEXVxjJkSeBEZAytK8hAaz2JexVufskzqToBEhuxgoUb82AeHEvKThYSOVqRza8yxiCbXTkMX4MW0Pavc+bftDLdjKlpWhKmc5siIw3OxZO25YU+bkYI4gz3Pk+YL3h1CvU09eScSp4FzYHIMxozI5GSpQRtmEiPVtAhQdonIdfPAs0WOlWfgjVQN6J/DnkixgBEbnvgYjfEUyU3uM+HVOxgrJH1KmK6cZjtSGq2QTS6Rycw1yivJMjNXYn1aecYtJn5cK3lpqJWYGs7XB1J75fCZuVCyj/6N7EAvMzsqnT8cdOcNtX3JojUgMUdYWJHuL/Esp9u4NNJrBQvO28aJ8LhSwKoXqgmHPe0wBY2KJLi9f8BqKVQPAhVnEKbAeDqXBPJUJ+SfFPohyLzBOagcML6xX+NGCm1ZCWrtqmmALe0gP6hts82C0AG2A=
+  file_glob: true
+  file: /tmp/result/*
+  skip_cleanup: true
+  on:
+    repo: webispy/mulberry
+    tags: true
