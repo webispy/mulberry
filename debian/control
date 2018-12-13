@@ -1,0 +1,33 @@
+Source: mulberry
+Section: net
+Priority: optional
+Maintainer: Inho Oh <webispy@gmail.com>
+Build-Depends: debhelper (>=9),
+	git,
+	cmake,
+	patch,
+	pkg-config,
+	libglib2.0-dev
+Standards-Version: 3.9.6
+Vcs-Git: https://github.com/webispy/mulberry.git
+Vcs-Browser: https://github.com/webispy/mulberry
+
+Package: mulberry
+Architecture: any
+Depends: ${shilbs:Depends}, ${misc:Depends}
+Description: Mulberry is a dbus based OCF daemon
+ Mulberry is a dbus based OCF daemon
+
+Package: mulberry-test
+Architecture: any
+Depends: mulberry
+Description: Mulberry is a dbus based OCF daemon (test programs)
+ Mulberry is a dbus based OCF daemon
+
+Package: mulberry-dbg
+Section: debug
+Architecture: any
+Depends: ${shilbs:Depends}, ${misc:Depends}
+Description: Mulberry is a dbus based OCF daemon (debugging symbols)
+ Mulberry is a dbus based OCF daemon
+
