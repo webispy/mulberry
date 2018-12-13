@@ -1,0 +1,6 @@
+[submodule "external/cJSON"]
+	path = external/cJSON
+	url = https://github.com/DaveGamble/cJSON.git
+[submodule "external/iotivity-constrained"]
+	path = external/iotivity-constrained
+	url = https://github.com/webispy/iotivity-constrained

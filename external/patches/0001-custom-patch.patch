@@ -1,0 +1,333 @@
+From a464f52df67b8b13660a58e9b6d7474065a19dfa Mon Sep 17 00:00:00 2001
+From: Inho Oh <webispy@gmail.com>
+Date: Thu, 13 Dec 2018 16:08:35 +0900
+Subject: [PATCH 1/1] custom patch
+
+Signed-off-by: Inho Oh <webispy@gmail.com>
+---
+ api/oc_introspection.c        |  2 +-
+ api/oc_server_api.c           |  4 ++++
+ apps/client_linux.c           | 12 ++++++----
+ messaging/coap/engine.c       | 44 ++++++++++++++++++++++++++++-------
+ messaging/coap/transactions.c | 15 ++++++++++++
+ security/oc_acl.c             |  4 ++++
+ security/oc_cred.c            |  4 ++++
+ security/oc_doxm.c            |  2 ++
+ security/oc_pstat.c           | 17 ++++++++++++++
+ 9 files changed, 89 insertions(+), 15 deletions(-)
+
+diff --git a/api/oc_introspection.c b/api/oc_introspection.c
+index e7cc2ad..cf9a2ad 100644
+--- a/api/oc_introspection.c
++++ b/api/oc_introspection.c
+@@ -31,7 +31,7 @@ static void
+ gen_idd_tag(const char *name, size_t device_index, char *idd_tag)
+ {
+   int idd_tag_len =
+-    snprintf(idd_tag, MAX_TAG_LENGTH, "%s_%d", name, device_index);
++    snprintf(idd_tag, MAX_TAG_LENGTH, "%s_%zd", name, device_index);
+   idd_tag_len =
+     (idd_tag_len < MAX_TAG_LENGTH) ? idd_tag_len + 1 : MAX_TAG_LENGTH;
+   idd_tag[idd_tag_len] = '\0';
+diff --git a/api/oc_server_api.c b/api/oc_server_api.c
+index f9ebf45..4602814 100644
+--- a/api/oc_server_api.c
++++ b/api/oc_server_api.c
+@@ -19,6 +19,8 @@
+ #include "messaging/coap/separate.h"
+ #include "oc_api.h"
+ 
++#include "log.h"
++
+ #if defined(OC_COLLECTIONS) && defined(OC_SERVER)
+ #include "oc_collection.h"
+ #endif /* OC_COLLECTIONS && OC_SERVER */
+@@ -346,6 +348,8 @@ oc_send_separate_response(oc_separate_response_t *handle,
+   response_buffer.response_length = (uint16_t)response_length();
+   response_buffer.code = oc_status_code(response_code);
+ 
++  mb_cbor_json(response_buffer.buffer, response_buffer.response_length);
++
+   coap_separate_t *cur = oc_list_head(handle->requests), *next = NULL;
+   coap_packet_t response[1];
+ 
+diff --git a/apps/client_linux.c b/apps/client_linux.c
+index 1bd07b8..1cb291c 100644
+--- a/apps/client_linux.c
++++ b/apps/client_linux.c
+@@ -26,6 +26,8 @@ static pthread_cond_t cv;
+ static struct timespec ts;
+ static int quit = 0;
+ 
++#define SERVER_RT "oic.r.switch.binary"
++
+ static int
+ app_init(void)
+ {
+@@ -62,7 +64,7 @@ post_light(oc_client_response_t *data)
+ static void
+ observe_light(oc_client_response_t *data)
+ {
+-  PRINT("OBSERVE_light:\n");
++  PRINT("\nOBSERVE_light:\n");
+   oc_rep_t *rep = data->payload;
+   while (rep != NULL) {
+     PRINT("key %s, value ", oc_string(rep->name));
+@@ -79,7 +81,7 @@ observe_light(oc_client_response_t *data)
+ 
+   if (oc_init_post(light_1, light_server, NULL, &post_light, LOW_QOS, NULL)) {
+     oc_rep_start_root_object();
+-    oc_rep_set_boolean(root, state, !light_state);
++    oc_rep_set_boolean(root, value, !light_state);
+     oc_rep_end_root_object();
+     if (oc_do_post())
+       PRINT("Sent POST request\n");
+@@ -104,7 +106,7 @@ discovery(const char *di, const char *uri, oc_string_array_t types,
+ 
+   for (i = 0; i < (int)oc_string_array_get_allocated_size(types); i++) {
+     char *t = oc_string_array_get_item(types, i);
+-    if (strlen(t) == 11 && strncmp(t, "oic.r.light", 11) == 0) {
++    if (strlen(t) == strlen(SERVER_RT) && strncmp(t, SERVER_RT, strlen(SERVER_RT)) == 0) {
+       strncpy(light_1, uri, uri_len);
+       light_1[uri_len] = '\0';
+       light_server = endpoint;
+@@ -118,7 +120,7 @@ discovery(const char *di, const char *uri, oc_string_array_t types,
+       }
+ 
+       oc_do_observe(light_1, light_server, NULL, &observe_light, LOW_QOS, NULL);
+-      oc_set_delayed_callback(NULL, &stop_observe, 10);
++      oc_set_delayed_callback(NULL, &stop_observe, 1);
+       return OC_STOP_DISCOVERY;
+     }
+   }
+@@ -129,7 +131,7 @@ discovery(const char *di, const char *uri, oc_string_array_t types,
+ static void
+ issue_requests(void)
+ {
+-  oc_do_ip_discovery("oic.r.light", &discovery, NULL);
++  oc_do_ip_discovery(SERVER_RT, &discovery, NULL);
+ }
+ 
+ static void
+diff --git a/messaging/coap/engine.c b/messaging/coap/engine.c
+index d39bc29..a489392 100644
+--- a/messaging/coap/engine.c
++++ b/messaging/coap/engine.c
+@@ -50,6 +50,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include "log.h"
++
+ #include "api/oc_events.h"
+ #include "oc_buffer.h"
+ #include "oc_ri.h"
+@@ -203,26 +205,44 @@ coap_receive(oc_message_t *msg)
+ 
+     /* handle requests */
+     if (message->code >= COAP_GET && message->code <= COAP_DELETE) {
++      const char *method;
+ 
+-#ifdef OC_DEBUG
+       switch (message->code) {
+       case COAP_GET:
+-        OC_DBG("  method: GET");
++        method = "GET ";
+         break;
+       case COAP_PUT:
+-        OC_DBG("  method: PUT");
++        method = "PUT ";
+         break;
+       case COAP_POST:
+-        OC_DBG("  method: POST");
++        method = "POST";
+         break;
+       case COAP_DELETE:
+-        OC_DBG("  method: DELETE");
++        method = "DEL ";
+         break;
+       }
+-      OC_DBG("  URL: %.*s", (int)message->uri_path_len, message->uri_path);
+-      OC_DBG("  QUERY: %.*s", (int)message->uri_query_len, message->uri_query);
+-      OC_DBG("  Payload: %.*s", (int)message->payload_len, message->payload);
+-#endif
++      printf("\n");
++      if (message->uri_path_len > 0)
++	      info("%s /%.*s", method, (int)message->uri_path_len, message->uri_path);
++      else
++	      info("%s", method);
++
++      if (message->uri_query_len > 0)
++	      info("QUERY: %.*s", (int)message->uri_query_len, message->uri_query);
++
++      {
++        int i;
++        char token_str[20];
++        for (i = 0; i < message->token_len; i++)
++           snprintf(token_str + (i * 2), 3, "%02X", message->token[i]);
++        token_str[i * 2] = 0;
++        info("TOKEN: %s (len=%d)", token_str, message->token_len);
++      }
++
++      if (message->payload_len > 0) {
++        info("Request payload %d bytes", message->payload_len);
++        mb_hexdump(message->payload, message->payload_len);
++      }
+ 
+ #ifdef OC_TCP
+       if (msg->endpoint.flags & TCP) {
+@@ -650,6 +670,12 @@ free_blockwise_buffers:
+ send_message:
+   if (coap_status_code == COAP_NO_ERROR) {
+     if (transaction) {
++
++      if (response->payload_len > 0) {
++        info("Response code %d, payload %d bytes", coap_status_code, response->payload_len);
++        mb_hexdump(response->payload, response->payload_len);
++      }
++
+       if (response->type != COAP_TYPE_RST && message->token_len) {
+         if (message->code >= COAP_GET && message->code <= COAP_DELETE) {
+           coap_set_token(response, message->token, message->token_len);
+diff --git a/messaging/coap/transactions.c b/messaging/coap/transactions.c
+index a68912e..d7cc906 100644
+--- a/messaging/coap/transactions.c
++++ b/messaging/coap/transactions.c
+@@ -45,6 +45,7 @@
+  * This file is part of the Contiki operating system.
+  */
+ 
++#define OC_DEBUG
+ #include "transactions.h"
+ #include "observe.h"
+ #include "oc_buffer.h"
+@@ -169,6 +170,20 @@ coap_send_transaction(coap_transaction_t *t)
+ #endif /* OC_SECURITY */
+ 
+ #ifdef OC_CLIENT
++      oc_client_cb_t *client_cb = oc_ri_find_client_cb_by_mid(t->mid);
++      if (client_cb->handler.response) {
++        oc_response_handler_t handler = (oc_response_handler_t)client_cb->handler.response;
++        oc_client_response_t client_response;
++        memset(&client_response, 0, sizeof(oc_client_response_t));
++        client_response.client_cb = client_cb;
++        client_response.endpoint = &t->message->endpoint;
++        client_response.observe_option = -1;
++        client_response.payload = 0;
++        client_response.user_data = client_cb->user_data;
++        client_response.code = GATEWAY_TIMEOUT_5_04;
++        handler(&client_response);
++      }
++
+       oc_ri_remove_client_cb_by_mid(t->mid);
+ #endif /* OC_CLIENT */
+ 
+diff --git a/security/oc_acl.c b/security/oc_acl.c
+index 1331edf..49afbf9 100644
+--- a/security/oc_acl.c
++++ b/security/oc_acl.c
+@@ -817,14 +817,18 @@ oc_sec_decode_acl(oc_rep_t *rep, bool from_storage, size_t device)
+       if (len == 10 && memcmp(oc_string(t->name), "rowneruuid", 10) == 0) {
+         if (!from_storage && (ps->s == OC_DOS_RFNOP || ps->s == OC_DOS_RFPRO)) {
+           OC_ERR("oc_acl: Cannot set rowneruuid in RFNOP/RFPRO");
++#ifndef CONFIG_IOTIVITY_COMPATIBILITY
+           return false;
++#endif
+         }
+       }
+       break;
+     case OC_REP_OBJECT_ARRAY: {
+       if (!from_storage && ps->s == OC_DOS_RFNOP) {
+         OC_ERR("oc_acl: Cannot provision ACE in RFNOP");
++#ifndef CONFIG_IOTIVITY_COMPATIBILITY
+         return false;
++#endif
+       }
+     } break;
+     default:
+diff --git a/security/oc_cred.c b/security/oc_cred.c
+index 1442e51..96a38e2 100644
+--- a/security/oc_cred.c
++++ b/security/oc_cred.c
+@@ -606,7 +606,9 @@ oc_sec_decode_cred(oc_rep_t *rep, oc_sec_cred_t **owner, bool from_storage,
+       if (len == 10 && memcmp(oc_string(t->name), "rowneruuid", 10) == 0) {
+         if (!from_storage && ps->s != OC_DOS_RFOTM && ps->s != OC_DOS_SRESET) {
+           OC_ERR("oc_cred: Can set rowneruuid only in RFOTM/SRESET");
++#ifndef CONFIG_IOTIVITY_COMPATIBILITY
+           return false;
++#endif
+         }
+       }
+       break;
+@@ -614,7 +616,9 @@ oc_sec_decode_cred(oc_rep_t *rep, oc_sec_cred_t **owner, bool from_storage,
+       if (!from_storage && ps->s != OC_DOS_RFOTM && ps->s != OC_DOS_SRESET &&
+           ps->s != OC_DOS_RFPRO) {
+         OC_ERR("oc_cred: Can set cred only in RFOTM/SRESET/RFPRO");
++#ifndef CONFIG_IOTIVITY_COMPATIBILITY
+         return false;
++#endif
+       }
+     } break;
+     default:
+diff --git a/security/oc_doxm.c b/security/oc_doxm.c
+index cdcaa49..70506d9 100644
+--- a/security/oc_doxm.c
++++ b/security/oc_doxm.c
+@@ -258,9 +258,11 @@ oc_sec_decode_doxm(oc_rep_t *rep, bool from_storage, size_t device)
+               break;
+             }
+           }
++#ifndef CONFIG_PERMANENT_UUID
+           if (i != 16) {
+             oc_core_regen_unique_ids(device);
+           }
++#endif
+         }
+       } else if (len == 10 &&
+                  memcmp(oc_string(rep->name), "rowneruuid", 10) == 0) {
+diff --git a/security/oc_pstat.c b/security/oc_pstat.c
+index fd6cef1..d2ac0c7 100644
+--- a/security/oc_pstat.c
++++ b/security/oc_pstat.c
+@@ -136,7 +136,20 @@ oc_pstat_handle_state(oc_sec_pstat_t *ps, size_t device)
+     ps->om = 3;
+     ps->sm = 4;
+     memset(ps->rowneruuid.id, 0, 16);
++#ifndef CONFIG_PERMANENT_UUID
+     oc_core_regen_unique_ids(device);
++#else
++    {
++      int i;
++      for (i = 0; i < 16; i++) {
++        if (doxm->deviceuuid.id[i] != 0)
++          break;
++      }
++
++      if (i == 16)
++        oc_core_regen_unique_ids(device);
++    }
++#endif
+     oc_sec_doxm_default(device);
+     oc_sec_cred_default(device);
+     oc_sec_acl_default(device);
+@@ -456,6 +469,7 @@ oc_sec_decode_pstat(oc_rep_t *rep, bool from_storage, size_t device)
+       }
+       break;
+     case OC_REP_STRING:
++#ifndef CONFIG_IOTIVITY_COMPATIBILITY
+       if ((from_storage || (ps.s != OC_DOS_RFPRO && ps.s != OC_DOS_RFNOP)) &&
+           oc_string_len(rep->name) == 10 &&
+           memcmp(oc_string(rep->name), "rowneruuid", 10) == 0) {
+@@ -463,6 +477,9 @@ oc_sec_decode_pstat(oc_rep_t *rep, bool from_storage, size_t device)
+       } else {
+         return false;
+       }
++#else
++      oc_str_to_uuid(oc_string(rep->value.string), &ps.rowneruuid);
++#endif
+       break;
+     default:
+       if (!(oc_string_len(rep->name) == 2 &&
+-- 
+2.17.1
+

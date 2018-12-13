@@ -1,0 +1,10 @@
+[Unit]
+Description=Mulberry OCF service daemon
+
+[Service]
+Type=dbus
+BusName=io.mulberry
+ExecStart=@bindir@/mulberry
+
+[Install]
+WantedBy=multi-user.target

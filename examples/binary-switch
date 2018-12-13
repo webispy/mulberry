@@ -1,0 +1,91 @@
+#!/usr/bin/python
+
+import dbus
+import dbus.exceptions
+import dbus.mainloop.glib
+import dbus.service
+
+try:
+    from gi.repository import GObject  # python3
+except ImportError:
+    import gobject as GObject  # python2
+
+mainloop = None
+
+MULBERRY_SERVICE_NAME = 'io.mulberry'
+MANAGER_IFACE = 'io.mulberry.Manager'
+DEVICE_IFACE = 'io.mulberry.Device'
+RESOURCE_IFACE = 'io.mulberry.Resource'
+
+DBUS_OM_IFACE = 'org.freedesktop.DBus.ObjectManager'
+DBUS_PROP_IFACE = 'org.freedesktop.DBus.Properties'
+
+class MyResource(dbus.service.Object):
+
+    def __init__(self, bus, object_path):
+        self.path = object_path
+        self.bus = bus
+        self.value = dbus.Boolean(False)
+        dbus.service.Object.__init__(self, bus, object_path)
+
+    def get_properties(self):
+        properties = dict()
+        return {RESOURCE_IFACE: properties}
+
+    def get_path(self):
+        return dbus.ObjectPath(self.path)
+
+    @dbus.service.method(dbus_interface=RESOURCE_IFACE,
+                         in_signature='', out_signature='a{sv}')
+    def Get(self):
+        print("Get", self.value)
+        return {'value': self.value }
+
+    @dbus.service.method(dbus_interface=RESOURCE_IFACE,
+                         in_signature='a{sv}', out_signature='')
+    def Post(self, asv):
+        print("Post", asv['value'])
+        self.value = asv["value"]
+
+    @dbus.service.method(dbus_interface=RESOURCE_IFACE,
+                         in_signature='a{sv}', out_signature='')
+    def Put(self, asv):
+        print("Put: ", asv['value'])
+        self.value = asv.value
+
+    @dbus.service.method(dbus_interface=RESOURCE_IFACE,
+                         in_signature='a{sv}', out_signature='')
+    def Del(self, asv):
+        print("Del:", asv)
+
+def main():
+    global mainloop
+
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+    bus = dbus.SystemBus()
+
+    manager = dbus.Interface(bus.get_object(MULBERRY_SERVICE_NAME, '/'), MANAGER_IFACE)
+
+    # Add sample device
+    # - name, device type
+    path = manager.AddDevice("test", "server", "oic.d.light")
+
+    # Create dbus object
+    light = MyResource(bus, "/light/1")
+
+    # Register light resource
+    # - name, dbus-path, coap uri path, resource type, interface
+    device = dbus.Interface(bus.get_object(MULBERRY_SERVICE_NAME, path), DEVICE_IFACE)
+    device.AddResource("lightbulb", light.get_path(), "/light", "oic.r.switch.binary", "oic.if.a")
+
+    # Set OCF Introspection
+    with open('introspection.json', 'r') as intro_file:
+        device.SetIntrospection(intro_file.read())
+
+    manager.StartService()
+    mainloop = GObject.MainLoop()
+    mainloop.run()
+
+if __name__ == '__main__':
+    main()

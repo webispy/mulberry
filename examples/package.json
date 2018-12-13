@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "dbus": "webispy/node-dbus"
+  }
+}
